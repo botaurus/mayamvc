@@ -5,120 +5,190 @@
 Mean value coordinates implimatation prototype
 
 DESCRIPTION: 
-    This script is a python implimation of this paper:
-        http://folk.uio.no/martinre/Publications/mv3d.pdf
-    Helpful website to ease the maths:
-        http://www.ams.org/samplings/feature-column/fcarc-harmonic
+	This script is a python implimation of part of this paper:
+		http://folk.uio.no/martinre/Publications/mv3d.pdf
+	Theorems 1 and 2 at the top of page 4
 
-    The script also sets up the maya scene.
+	Helpful website to ease the maths:
+		http://www.ams.org/samplings/feature-column/fcarc-harmonic
+
+	The script also sets up the maya scene.
 
 USAGE:
-    usage
+	put mayamvc folder into maya/scripts and run:
+
+import mayamvc.main as mvc
+reload(mvc)
+mvc.main()
+
+	turn on interactive playback or run mvc.update() after moving verts on the cage
+
 
 """
-import cgcg_rigging.lib.utils as u
+#import cgcg_rigging.lib.utils as u
 import maya.OpenMaya as om
 from math import *
 import maya.cmds as cmds
+import utils
 
-def wi(v,vi,tris):
-    #calculates the weights
-    #v = kernal of the starshaped polyhedron. this is the point that will be deformed
-    #vi = the current vert we are iterating over on the bounding polyhedron
-    #tris = all triangle facets on the polyhedron that vi is a member of
-    def A(vr,vs):
-        #get an angle
-        vec1 = vr-v
-        vec2 = vs-v
-        return vec1.angle(vec2)
-    def N(vr, vs):
-        #get the normal
-        vecr = vr-v
-        vecs = vs-v
-        norm = vecr^vecs
-        norm.normalize()
-        return norm
-    
-    def ut(i,j,k):
-        #floater's equation for ut
-        vecvi = (v-i)
-        vecvi.normalize()
-        top = A(j,k) + A(i,j)*( N(i, j)*N(j, k) ) + A(k,i)*(N(k, i)*N(j, k))
-        bot = 2*( vecvi*N(j,k) )
-        return top/bot
-    ''' 
-    def ut(i,j,k):
-        #this gets the area of a triangle, it is no more accurate than the above implimatation of Float's equation
-        a, b, c = i.distanceTo(j), j.distanceTo(k), k.distanceTo(i)
-        p = (a+b+c)/2
-        return sqrt( p*(p-a)*(p-b)*(p-c) )
-    ''' 
-    ri = v.distanceTo(vi)
-    ut_sum = 0
-    for t in tris:
-        ut_sum += ut(t[0], t[1], t[2])
-    print "\n"
-    return ut_sum/ri
+reload(utils)
+
+mvc_node = None
+
+def ut(v,vi,tris):
+	"""calculates the value that is used to get the barycentric coordinates
+	Args:
+		v(MPoint) = kernal of the starshaped polyhedron. this is the point that will be deformed
+		vi(MPoint) = the current vert we are iterating over on the bounding polyhedron
+		tris(list of MPoints) = all triangle facets on the polyhedron that vi is a member of
+	"""
+	def A(vr,vs):
+		#get an angle
+		vec1 = vr-v
+		vec2 = vs-v
+		return vec1.angle(vec2)
+
+	def N(vr, vs):
+		#get the normal
+		vecr = vr-v
+		vecs = vs-v
+		norm = vecr^vecs
+		norm.normalize()
+		return norm
+	
+	def _ut(i,j,k):
+		#floater's equation for ut
+		vecvi = (v-i)
+		vecvi.normalize()
+		top = A(j,k) + A(i,j)*( N(i, j)*N(j, k) ) + A(k,i)*(N(k, i)*N(j, k))
+		bot = 2*( vecvi*N(j,k) )
+		return top/bot
+
+	ri = v.distanceTo(vi)
+	ut_sum = 0
+	for t in tris:
+		ut_sum += _ut(t[0], t[1], t[2])
+	return ut_sum/ri
 
 class MVC():
-    def __init__(self):
-        #this is our main vert, the one that will be deformed
-        self.v = u.pnt("v")
-        self.bary = self.get_bary()
+	def __init__(self, cage, loc):
+		"""set weights and update mean value coordinates for a point in a cage
+		Args:
+			cage(MayaPolyWrapper) - deform this then call update to
+		"""
+		self.cage = cage
+		self.loc = loc
+		self.calculate_bary_coords()
 
-    def update(self):
-        v = self.v
-        #refresh the list p with the current location of the locators in maya
-        p = [u.pnt("v0"), u.pnt("v1"), u.pnt("v2"), u.pnt("v3")]
-        x,y,z = 0,0,0
-        for i in range(len(p)):
-            x += p[i].x*self.bary[i]
-            y += p[i].y*self.bary[i]
-            z += p[i].z*self.bary[i]
-        #place a new locator at the deformed position
-        u.loc(om.MPoint(x, y, z))
+	def update(self):
+		#refresh the list p with the current location of the locators in maya
+		pnts = self.cage.get_vert_pnts()
 
-    def get_bary(self):
-        v = self.v
-        #get 4 points from maya that represent a polygon
-        p = [u.pnt("v0"), u.pnt("v1"), u.pnt("v2"), u.pnt("v3")]
-        #create a list of verts and all triangles that that vert is a memeber of
-        #the triangels are i,j,k, going counter clock wise, and i = the associated vert that will be iterated over
-        vert_tri=[
-        [p[0], [(p[0], p[1], p[2]), (p[0], p[3], p[1]), (p[0], p[2], p[3]),]],
-        [p[1], [(p[1], p[2], p[0]), (p[1], p[3], p[2]), (p[1], p[0], p[3]),]],
-        [p[2], [(p[2], p[0], p[1]), (p[2], p[1], p[3]), (p[2], p[3], p[0]),]],
-        [p[3], [(p[3], p[2], p[1]), (p[3], p[1], p[0]), (p[3], p[0], p[2]),]],
-        ]
+		x,y,z = 0,0,0
+		for i in range(len(pnts)):
+			x += pnts[i].x*self.bary[i]
+			y += pnts[i].y*self.bary[i]
+			z += pnts[i].z*self.bary[i]
 
-        #verify in maya that all triangles are counter clockwise, normal outward, and begin with the
-        #same vert, the one that will be iterated over
-        new_vert_tri = []
-        for vt in vert_tri:
-            new_triangles = []
-            for tt in vt[1]:
-                t= list(tt)
-                #t.reverse()
-                #_tmp = [t[2], t[0], t[1]]
-                _tmp = t
-                new_triangles.append(_tmp)
-                v1,v2,v3 = _tmp[0],_tmp[1],_tmp[2]
-                cmds.polyCreateFacet(p=[(v1.x, v1.y, v1.z), (v2.x, v2.y, v2.z), (v3.x, v3.y, v3.z)])
-                print v1.x, v1.y, v1.z
-            print vt[0].x, vt[0].y, vt[0].z
-            print "\n"
-            new_vert_tri.append([vt[0], new_triangles])
+		cmds.setAttr(self.loc+".t", x,y,z)
+		
 
-        #get the weight
-        weights = []
-        for vt in new_vert_tri:
-            t= list(vt[1])
-            t.reverse()
-            weights.append(wi(v, vt[0], t))
+	def calculate_bary_coords(self):
+		pnt_map = self.cage.get_poly_pnt_map()
+		#calculate ut
+		ut_values = []
+		for m in pnt_map:
+			tris= list(m[1])
+			tris.reverse()
+			ut_values.append(ut(utils.pnt(self.loc), m[0], tris))
 
-        #get the bary weights
-        bary_weights=[]
-        weights_sum = sum(weights)
-        for w in weights:
-            bary_weights.append(w/weights_sum)
-        return bary_weights
+		#barycentric coordinates
+		bary=[]
+		ut_sum = sum(ut_values)
+		for u in ut_values:
+			bary.append(u/ut_sum)
+
+		self.bary = bary
+
+class MayaPolyWrapper():
+		"""interface wrapper for mvc to use maya polygons
+	
+		Args:
+			poly_map [[vert, [all triangles that contain this vert],] - map of all verts
+				in the poly and the tris they are a member of
+		"""
+		def __init__(self, poly_map):
+			self.poly_map = poly_map
+
+		def get_poly_pnt_map(self):
+			"""return poly_map as MPoints
+			"""
+			pnt_map = []
+			for m in self.poly_map:
+				tris = []
+				for t in m[1]:
+					tris.append([utils.pnt(x) for x in t])
+				pnt_map.append([utils.pnt(m[0]), tris])
+			return pnt_map
+
+		def get_vert_pnts(self):
+			"""return list of verts pos as MPoints
+			"""
+			return [utils.pnt(x[0]) for x in self.poly_map]
+
+
+
+def setup_scene():
+	#manually create a simple tetrahedron 
+	p1 = cmds.polyCreateFacet(p=[(0,0,0), (1,0,0), (0,0,1)])
+	p2 = cmds.polyCreateFacet(p=[(0,0,0), (0,1,0), (1,0,0)])
+	p3 = cmds.polyCreateFacet(p=[(0,0,0), (0,0,1), (0,1,0)])
+	p4 = cmds.polyCreateFacet(p=[(0,0,1), (1,0,0), (0,1,0)])
+	cmds.polyMergeVertex(cmds.polyUnite(p1,p2,p3,p4, ch=0, name = "cage"), ch=0)
+	poly_map =[
+		["cage.vtx[0]", [ 	("cage.vtx[0]","cage.vtx[2]","cage.vtx[3]"),
+							("cage.vtx[0]","cage.vtx[3]","cage.vtx[1]"),
+							("cage.vtx[0]","cage.vtx[1]","cage.vtx[2]"),
+						]
+		],
+		["cage.vtx[1]", [ 	("cage.vtx[1]","cage.vtx[0]","cage.vtx[3]"),
+							("cage.vtx[1]","cage.vtx[3]","cage.vtx[2]"),
+							("cage.vtx[1]","cage.vtx[2]","cage.vtx[0]"),
+						]
+		],
+		["cage.vtx[2]", [ 	("cage.vtx[2]","cage.vtx[3]","cage.vtx[0]"),
+							("cage.vtx[2]","cage.vtx[1]","cage.vtx[3]"),
+							("cage.vtx[2]","cage.vtx[0]","cage.vtx[1]"),
+						]
+		],
+		["cage.vtx[3]", [ 	("cage.vtx[3]","cage.vtx[2]","cage.vtx[1]"),
+							("cage.vtx[3]","cage.vtx[1]","cage.vtx[0]"),
+							("cage.vtx[3]","cage.vtx[0]","cage.vtx[2]"),
+						]
+		]
+		]
+	#debug tetra
+	"""
+	for p in poly_map:
+		tris = p[1]
+		for t in tris:
+			pnts = []
+			for vert in t:
+				pnt = utils.pnt(vert)
+				pnts.append([pnt.x, pnt.y, pnt.z])
+			cmds.polyCreateFacet(p=pnts)
+	"""
+
+	cage = MayaPolyWrapper(poly_map)
+	loc = utils.loc([.1,.1,.1])
+	return cage, loc
+
+
+def main():
+	global mvc_node
+	cage, loc = setup_scene()
+	mvc_node = MVC(cage, loc)
+	cmds.expression(s='python("mvc.update()");')
+
+def update():
+	mvc_node.update()
