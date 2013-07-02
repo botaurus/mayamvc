@@ -8,10 +8,12 @@ next step is to write a c++ plugin
 
 http://folk.uio.no/martinre/Publications/mv3d.pdf
 
+##Usage
 put mayamvc folder into maya/scripts and run:
 
-import mayamvc.main as mvc
-reload(mvc)
-mvc.main()
+    import mayamvc.main as mvc
+    reload(mvc)
+    mvc.main()
+
 
 turn on interactive playback or run mvc.update() after moving verts on the cage
